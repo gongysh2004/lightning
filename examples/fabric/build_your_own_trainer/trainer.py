@@ -34,6 +34,7 @@ class MyCustomTrainer:
         use_distributed_sampler: bool = True,
         checkpoint_dir: str = "./checkpoints",
         checkpoint_frequency: int = 1,
+        num_nodes: int = 1,
     ) -> None:
         """Exemplary Trainer with Fabric. This is a very simple trainer focused on readablity but with reduced
         featureset. As a trainer with more included features, we recommend using the
@@ -94,6 +95,7 @@ class MyCustomTrainer:
             plugins=plugins,
             callbacks=callbacks,
             loggers=loggers,
+            num_nodes=num_nodes,
         )
         self.global_step = 0
         self.grad_accum_steps: int = grad_accum_steps
@@ -154,6 +156,7 @@ class MyCustomTrainer:
 
         optimizer, scheduler_cfg = self._parse_optimizers_schedulers(model.configure_optimizers())
         assert optimizer is not None
+        original_model = model
         model, optimizer = self.fabric.setup(model, optimizer)
 
         # assemble state (current epoch and global step will be added in save)
@@ -175,7 +178,7 @@ class MyCustomTrainer:
             )
 
             if self.should_validate:
-                self.val_loop(model, val_loader, limit_batches=self.limit_val_batches)
+                self.val_loop(original_model, val_loader, limit_batches=self.limit_val_batches)
 
             self.step_scheduler(model, scheduler_cfg, level="epoch", current_value=self.current_epoch)
 
@@ -487,7 +490,7 @@ class MyCustomTrainer:
             if all(isinstance(_opt_cand, L.fabric.utilities.types.Optimizable) for _opt_cand in configure_optim_output):
                 # single optimizer in list
                 if len(configure_optim_output) == 1:
-                    return configure_optim_output[0][0], None
+                    return configure_optim_output[0], None
 
                 raise NotImplementedError("BYOT only supports a single optimizer")
 

@@ -2,6 +2,7 @@ import torch
 from torchmetrics.functional.classification.accuracy import accuracy
 from trainer import MyCustomTrainer
 
+import os
 import lightning as L
 
 
@@ -42,12 +43,12 @@ class MNISTModule(L.LightningModule):
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=1e-4)
-        return optim, {
+        return [optim], [{
             "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optim, mode="max", verbose=True),
             "monitor": "val_accuracy",
             "interval": "epoch",
             "frequency": 1,
-        }
+        }]
 
     def validation_step(self, *args, **kwargs):
         return self.training_step(*args, **kwargs)
@@ -71,11 +72,24 @@ def train(model):
     # If you want to use MPS, set accelerator='auto' and also set PYTORCH_ENABLE_MPS_FALLBACK=1
     accelerator = "cpu" if torch.backends.mps.is_available() else "auto"
 
+    nodes = os.environ.get("NODES_SIZE", 1)
+    gpus_per_node = os.environ.get("GPUS_PER_NODE", 2)
+    # trainer = L.Trainer(accelerator="gpu", devices=gpus_per_node, num_nodes=nodes, strategy="ddp" , enable_model_summary=True,
+    #                     accumulate_grad_batches=2,limit_train_batches=10, limit_val_batches=20, max_epochs=10,
+    #                     log_every_n_steps=5)
     trainer = MyCustomTrainer(
-        accelerator=accelerator, devices="auto", limit_train_batches=10, limit_val_batches=20, max_epochs=3
+        accelerator=accelerator, devices=gpus_per_node, nodes=nodes, grad_accum_steps=1,limit_train_batches=10,
+        limit_val_batches=20, max_epochs=3
     )
     trainer.fit(model, train_loader, val_loader)
 
 
 if __name__ == "__main__":
+        # to fix kubeflow torch operator problem, where it can set RANK as Node_rank according to replica
+    # and WORLD_SIZE as the sum of replica, which supports only one gpu per pod and wrong NODE_RANK.
+    if os.environ.get("EX_WORLD_SIZE", None):
+       os.environ["WORLD_SIZE"] = os.environ.pop("EX_WORLD_SIZE")
+       os.environ["NODE_RANK"] = os.environ.pop("RANK")
+    torch.set_float32_matmul_precision('high')
+    torch.set_float32_matmul_precision('high')
     train(MNISTModule())
